@@ -15,6 +15,7 @@ class PicoChannel :
     vrange       : str
     buffer_small : int
     buffer_total : int
+    data         : float
     status       : str
     irange       : int = None # Different only for measuring current over a resistor, must be a value in A
 
@@ -57,6 +58,7 @@ class Picoscope5000a():
                  samples_total, 
                  sampling_time, 
                  time_unit,
+                 saving_file_path = None,
                  is_debug = False):
         '''
         Set parameters valid for the acquisition on all channels and variables
@@ -157,7 +159,19 @@ class Picoscope5000a():
         print("> Pico msg: Acquisition started!")
         self.cFuncPtr = ps.StreamingReadyType(self.streaming_callback)
         self.get_data_loop()
-        
+
+
+    def _store_lates_data(self):
+        for ch in self.channels.values():
+            latest_data = self.convert2volts(ch.buffer_total, ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
+            # Convert to current (A) if the case 
+            if ch.irange is not None: latest_data = np.muliply(ch.buffer_total, ch.irange)   
+            ch["saving_file"].write(latest_data)
+            ch["saving_file"].write('\n')
+
+    def _close_saving_files(self):
+        for ch in self.channels.values():
+            ch["saving_file"].close()
     
     def get_data_loop(self):
         '''
@@ -167,12 +181,15 @@ class Picoscope5000a():
             self.wasCalledBack = False
             self.status["getStreamingLastestValues"] = ps.ps5000aGetStreamingLatestValues(self.handle, 
                                                                                           self.cFuncPtr, 
-                                                                                          None)                                                                             
+                                                                                          None) 
+            self._store_lates_data()
+            # !!! Here I can put the process part for online data elaboration
             if not self.wasCalledBack:
                 # If we weren't called back by the driver, this means no data is ready. Sleep for a short while before trying
                 # again.
-                time.sleep(0.001)
+                time.sleep(0.1)
         else:
+            self._close_saving_files()
             print('> Pico msg: Acquisition completed!')
         # return self.channels
     
@@ -185,19 +202,17 @@ class Picoscope5000a():
         Convert data from integer of the ADC to values in voltage
         '''
         return np.multiply(-signal, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
-        
-
-
+    
     
     def convert_all_channels(self):
         '''
         Convert data from all the channel to voltage values and to current if
         specified in the channel definition.
         '''
-        for ch in self.channels.values():
-            ch.buffer_total = self.convert2volts(ch.buffer_total, ch.vrange)
+        for ch in self.channels.values(): 
+            data = self.convert2volts(ch.buffer_total, ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
             # Convert to current (A) if the case 
-            if ch.irange is not None: ch.buffer_total = np.muliply(ch.buffer_total, ch.irange)
+            if ch.irange is not None: data = np.muliply(ch.buffer_total, ch.irange)
 
     
     def stop(self):
@@ -220,7 +235,7 @@ class Picoscope5000a():
     
     
     
-    def set_channel(self, channel, vrange): 
+    def set_channel(self, channel, vrange, saving_path): 
         '''
         Set channel of the connetted picoscope.
         Parameters:
@@ -293,3 +308,5 @@ class Picoscope5000a():
                                                               ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'])
         assert_pico_ok(ch.status["setDataBuffers"])
         
+        saving_file = open(f'saving_path/pico_acquisition/{ch.name}', 'w')
+        ch["saving_file"] = saving_file
