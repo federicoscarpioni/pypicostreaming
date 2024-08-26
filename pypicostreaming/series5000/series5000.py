@@ -8,6 +8,8 @@ from picosdk.ps5000a import ps5000a as ps
 from picosdk.functions import adc2mV, assert_pico_ok
 from dataclasses import dataclass
 from threading import Thread
+from pathlib import Path
+from typing import TextIO
 
 @dataclass
 class PicoChannel :
@@ -15,8 +17,8 @@ class PicoChannel :
     vrange       : str
     buffer_small : int
     buffer_total : int
-    data         : float
     status       : str
+    saving_file  : TextIO
     irange       : int = None # Different only for measuring current over a resistor, must be a value in A
 
 
@@ -58,7 +60,6 @@ class Picoscope5000a():
                  samples_total, 
                  sampling_time, 
                  time_unit,
-                 saving_file_path = None,
                  is_debug = False):
         '''
         Set parameters valid for the acquisition on all channels and variables
@@ -166,12 +167,12 @@ class Picoscope5000a():
             latest_data = self.convert2volts(ch.buffer_total, ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
             # Convert to current (A) if the case 
             if ch.irange is not None: latest_data = np.muliply(ch.buffer_total, ch.irange)   
-            ch["saving_file"].write(latest_data)
-            ch["saving_file"].write('\n')
+            ch.saving_file.write(latest_data)
+            ch.saving_file.write('\n')
 
     def _close_saving_files(self):
         for ch in self.channels.values():
-            ch["saving_file"].close()
+            ch.saving_file.close()
     
     def get_data_loop(self):
         '''
@@ -210,9 +211,9 @@ class Picoscope5000a():
         specified in the channel definition.
         '''
         for ch in self.channels.values(): 
-            data = self.convert2volts(ch.buffer_total, ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
+            ch.buffer_total = self.convert2volts(ch.buffer_total, ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
             # Convert to current (A) if the case 
-            if ch.irange is not None: data = np.muliply(ch.buffer_total, ch.irange)
+            if ch.irange is not None: ch.buffer_total = np.muliply(ch.buffer_total, ch.irange)
 
     
     def stop(self):
@@ -235,7 +236,7 @@ class Picoscope5000a():
     
     
     
-    def set_channel(self, channel, vrange, saving_path): 
+    def set_channel(self, channel, vrange, saving_path, IRange = None): 
         '''
         Set channel of the connetted picoscope.
         Parameters:
@@ -275,11 +276,18 @@ class Picoscope5000a():
         index of the channelInputRanges list which contains values in mV
         channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
         '''
+        
+        saving_dir = saving_path+'/pico_aquisition'
+        Path(saving_dir).mkdir(parents=True, exist_ok=True)
+        saving_file = open(saving_dir + f'/channel{channel[-1]}.txt', 'w')
+        
         self.channels[channel[-1]] = PicoChannel(channel, 
                                                  ps.PS5000A_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
                                                  np.zeros(shape=self.capture_size*self.number_captures, dtype=np.int16),
-                                                 {})
+                                                 {},
+                                                 saving_file,
+                                                 IRange)
         # Give an alias to the object for an easier reference
         ch = self.channels[channel[-1]]
         channelEnabled = True
@@ -308,5 +316,4 @@ class Picoscope5000a():
                                                               ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'])
         assert_pico_ok(ch.status["setDataBuffers"])
         
-        saving_file = open(f'saving_path/pico_acquisition/{ch.name}', 'w')
-        ch["saving_file"] = saving_file
+        
