@@ -117,8 +117,8 @@ class Picoscope5000a():
                 print (ch.buffer_small)
         if self.is_debug: print('Copied small buffers to big buffers')
         self.nextSample += noOfSamples
-        # if autoStop: 
-        #     self.autoStopOuter = True
+        if autoStop: 
+            self.autoStopOuter = True
     
     
     def run_streaming_non_blocking(self, autoStop = True):
