@@ -187,7 +187,7 @@ class Picoscope5000a():
         '''
         numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
         if irange != None:
-            numbers = np.muliply(ch.buffer_total, ch.irange)
+            numbers = np.multiply(numbers, irange)
         return numbers
 
     def convert2volts(self, signal, vrange):
@@ -205,7 +205,7 @@ class Picoscope5000a():
         for ch in self.channels.values(): 
             ch.buffer_total = self.convert2volts(ch.buffer_total, ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
             # Convert to current (A) if the case 
-            if ch.irange is not None: ch.buffer_total = np.muliply(ch.buffer_total, ch.irange)
+            if ch.irange is not None: ch.buffer_total = np.multiply(ch.buffer_total, ch.irange)
 
     
     def stop(self):
@@ -246,7 +246,7 @@ class Picoscope5000a():
                     f'Time unit : {self.time_unit}\n'
                     f'Device handle id : {self.handle}\n')
     
-    def set_channel(self, channel, vrange, saving_path, IRange = None): 
+    def set_channel(self, channel, vrange, saving_path, irange = None): 
         '''
         Set channel of the connetted picoscope.
         Parameters:
@@ -321,13 +321,13 @@ class Picoscope5000a():
         signal and gives the pointer of the buffer to the driver
         buffer_total must be Numpy array
         '''
-        # segmentIndex = 0 # the number of the memory segment to be used. The picoscope memory can be divided in segments and acquire different signals
+        segmentIndex = 0 # the number of the memory segment to be used. The picoscope memory can be divided in segments and acquire different signals
         ch.status["setDataBuffers"] = ps.ps5000aSetDataBuffer(self.handle,
                                                               ps.PS5000A_CHANNEL[ch.name],
                                                               ch.buffer_small.ctypes.data_as(
                                                                   ctypes.POINTER(ctypes.c_int16)),
                                                               self.capture_size,
-                                                              ch.newest_data_position, 
+                                                              segmentIndex, 
                                                               ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'])
         assert_pico_ok(ch.status["setDataBuffers"])
         

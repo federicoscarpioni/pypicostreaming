@@ -171,7 +171,7 @@ class PicoScope4000():
         '''
         numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
         if irange != None:
-            numbers = np.muliply(ch.buffer_total, ch.irange)
+            numbers = np.multiply(numbers, irange)
         return numbers
     
     
@@ -192,7 +192,7 @@ class PicoScope4000():
         for ch in self.channels.values():
             ch.buffer_total = self.convert2volts(ch.buffer_total, ch.vrange)
             # Convert to current (A) if the case 
-            if ch.irange is not None: ch.buffer_total = np.muliply(ch.buffer_total, ch.irange)
+            if ch.irange is not None: ch.buffer_total = np.multiply(ch.buffer_total, ch.irange)
 
     
     def stop(self):
