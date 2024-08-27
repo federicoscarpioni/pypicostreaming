@@ -19,11 +19,13 @@ class PicoChannel :
     buffer_total : int
     status       : str
     saving_file  : TextIO
+    latest_writing_position : int = 0
+    newest_data_position : int = 0
     irange       : int = None # Different only for measuring current over a resistor, must be a value in A
 
 
 class Picoscope5000a():
-    def __init__(self, resolution, serial = None):
+    def __init__(self, serial, resolution):
         '''
         If serial is None, the driver will connect to the first connected device.
         
@@ -106,15 +108,19 @@ class Picoscope5000a():
         The callback function called by the Picoscope driver. Slightly modified
         from the example to include the class attributes.
         '''
+        print('Callback called!')
         self.wasCalledBack = True
         destEnd = self.nextSample + noOfSamples
         sourceEnd = startIndex + noOfSamples
+        if self.is_debug: print(f'Number of samples copied in the buffer: {noOfSamples}')
         for ch in self.channels.values():
             ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
-            np.savetxt(ch.saving_file, 
-                       self.convert_ADC_numbers(ch.buffer_total[self.nextSample:destEnd],ch.vrange, ch.irange),
-                       delimiter = '\t')
+            if self.is_debug : 
+                print('Channel'+ch.name[-1]+ ' small buffer:')
+                print (ch.buffer_small)
+        if self.is_debug: print('Copied small buffers to big buffers')
         self.nextSample += noOfSamples
+        self._store_lates_data()
         if autoStop: 
             self.autoStopOuter = True
     
@@ -136,8 +142,8 @@ class Picoscope5000a():
         assert_pico_ok(self.status["runStreaming"])
         print("> Pico msg: Acquisition started!")
         self.cFuncPtr = ps.StreamingReadyType(self.streaming_callback)
-        get_data_thread = Thread( target=(self.get_data_loop) )
-        get_data_thread.start()
+        self.get_data_thread = Thread( target=(self.get_data_loop) )
+        self.get_data_thread.start()
         
     
     def run_streaming_blocking(self, autoStop = True):
@@ -160,6 +166,20 @@ class Picoscope5000a():
         self.get_data_loop()
 
 
+    def _store_lates_data(self):
+        for ch in self.channels.values():
+            latest_data = self.convert2volts(ch.buffer_total[ch.latest_writing_position:ch.newest_data_position], ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
+            # Convert to current (A) if the case 
+            if ch.irange is not None: latest_data = np.muliply(ch.buffer_total, ch.irange)   
+            np.savetxt(ch.saving_file, latest_data, delimiter = '\t')
+            # ch.saving_file.write('\n')
+            ch.latest_writing_position = ch.newest_data_position
+        print('Data saved to storage')
+
+    def _close_saving_files(self):
+        for ch in self.channels.values():
+            ch.saving_file.close()
+    
     def get_data_loop(self):
         '''
         Run the streaming from picoscope in a dedicated thread
@@ -172,7 +192,7 @@ class Picoscope5000a():
             if not self.wasCalledBack:
                 # If we weren't called back by the driver, this means no data is ready. Sleep for a short while before trying
                 # again.
-                time.sleep(0.001)
+                time.sleep(0.1)
         else:
             self._close_saving_files()
             print('> Pico msg: Acquisition completed!')
@@ -181,15 +201,7 @@ class Picoscope5000a():
     def available_device(self):
         return ps.ps5000aEnumerateUnits() # i don't understand how it works
     
-    def convert_ADC_numbers (self, data, vrange, irange = None):
-        ''' 
-        Convert the data from the ADC into physical values.
-        '''
-        numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
-        if irange != None:
-            numbers = np.muliply(ch.buffer_total, ch.irange)
-        return numbers
-
+    
     def convert2volts(self, signal, vrange):
         '''
         Convert data from integer of the ADC to values in voltage
@@ -216,7 +228,6 @@ class Picoscope5000a():
         self.status["stop"] = ps.ps5000aStop(self.handle)
         assert_pico_ok(self.status["stop"])
         self.autoStopOuter = True
-        self._close_saving_files
         print("> Pico msg: pico stopped!")
     
     
@@ -228,23 +239,7 @@ class Picoscope5000a():
         assert_pico_ok(self.status["close"])
         print("> Pico msg: Device disconnected.")
     
-    def _close_saving_files(self):
-        for ch in self.channels.values():
-            ch.saving_file.close()
-
-    def _save_channel_metadata(self, channel, saving_dir):
-        with open(saving_dir+f'/metadata_channel{channel.name[-1]}.txt', 'w') as f:
-            f.write(f'Name : {channel.name}\n'
-                    f'Voltage range : {channel.vrange}\n'
-                    f'Allocated driver buffer: {channel.buffer_small.size} Points\n'
-                    f'Allocated software buffer : {channel.buffer_total.size} Points\n'
-                    f'IRange : {channel.irange}\n'
-                    f'Capture size: {self.capture_size} Points\n'
-                    f'Samples total : {self.samples_total} Points\n'
-                    f'Number captures : {self.number_captures} \n'
-                    f'Sampling time : {self.sampling_time}\n'
-                    f'Time unit : {self.time_unit}\n'
-                    f'Device handle id : {self.handle}\n')
+    
     
     def set_channel(self, channel, vrange, saving_path, IRange = None): 
         '''
@@ -290,19 +285,14 @@ class Picoscope5000a():
         saving_dir = saving_path+'/pico_aquisition'
         Path(saving_dir).mkdir(parents=True, exist_ok=True)
         saving_file = open(saving_dir + f'/channel{channel[-1]}.txt', 'w')
-        # Create header for the file
-        if irange == None:
-            saving_file.write('Voltage/V\n')
-        else:
-            saving_file.write('Current/A\n')
-
+        
         self.channels[channel[-1]] = PicoChannel(channel, 
                                                  ps.PS5000A_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
                                                  np.zeros(shape=self.capture_size*self.number_captures, dtype=np.int16),
                                                  {},
                                                  saving_file,
-                                                 irange)
+                                                 IRange)
         # Give an alias to the object for an easier reference
         ch = self.channels[channel[-1]]
         channelEnabled = True
@@ -321,7 +311,7 @@ class Picoscope5000a():
         signal and gives the pointer of the buffer to the driver
         buffer_total must be Numpy array
         '''
-        # segmentIndex = 0 # the number of the memory segment to be used. The picoscope memory can be divided in segments and acquire different signals
+        segmentIndex = 0 # the number of the memory segment to be used. The picoscope memory can be divided in segments and acquire different signals
         ch.status["setDataBuffers"] = ps.ps5000aSetDataBuffer(self.handle,
                                                               ps.PS5000A_CHANNEL[ch.name],
                                                               ch.buffer_small.ctypes.data_as(
@@ -331,4 +321,4 @@ class Picoscope5000a():
                                                               ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'])
         assert_pico_ok(ch.status["setDataBuffers"])
         
-        self._save_channel_metadata(ch, saving_dir)
+        

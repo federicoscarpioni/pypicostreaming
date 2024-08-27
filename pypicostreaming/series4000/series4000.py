@@ -105,7 +105,6 @@ class PicoScope4000():
             self.autoStopOuter = True
             
     
-    
     def run_streaming_non_blocking(self, autoStop = False):
         ''' 
         Start the streaming of sampled signals from picoscope internal memory.
@@ -149,7 +148,7 @@ class PicoScope4000():
         '''
         Run the streaming from picoscope in a dedicated thread
         '''
-        while self.nextSample < self.samples_total and not self.autoStopOuter:
+        while not self.autoStopOuter:
             self.wasCalledBack = False
             self.status["getStreamingLastestValues"] = ps.ps4000GetStreamingLatestValues(self.handle, 
                                                                                           self.cFuncPtr, 
@@ -172,7 +171,7 @@ class PicoScope4000():
         '''
         numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
         if irange != None:
-            numbers = numbers * irange
+            numbers = np.muliply(ch.buffer_total, ch.irange)
         return numbers
     
     
