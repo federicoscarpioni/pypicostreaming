@@ -16,6 +16,7 @@ class PicoChannel :
     buffer_small : int
     buffer_total : int
     status       : str
+    saving_file  : TextIO
     irange       : int = None # Different only for measuring current over a resistor, must be a value in A
 
 class PicoScope4000():
@@ -95,13 +96,11 @@ class PicoScope4000():
         if self.is_debug: print(f'Number of samples copied in the buffer: {noOfSamples}')
         for ch in self.channels.values():
             ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
-            if self.is_debug : 
-                print('Channel'+ch.name[-1]+ ' small buffer:')
-                print (ch.buffer_small)
-        if self.is_debug: print('Copied small buffers to big buffers')
+            np.savetxt(ch.buffer_small[startIndex:sourceEnd], latest_data, delimiter = '\t')
         self.nextSample += noOfSamples
-        # if autoStop: 
-        #     self.autoStopOuter = True
+        if autoStop: 
+            self.autoStopOuter = True
+            self._close_saving_files
     
     
     def run_streaming_non_blocking(self, autoStop = False):
@@ -191,6 +190,8 @@ class PicoScope4000():
         '''
         self.status["stop"] = ps.ps4000Stop(self.handle)
         assert_pico_ok(self.status["stop"])
+        self.autoStopOuter = True
+        self._close_saving_files
         print("> Pico msg: pico stopped!")
     
     
@@ -202,9 +203,20 @@ class PicoScope4000():
         assert_pico_ok(self.status["close"])
         print("> Pico msg: Device disconnected.")
     
+    # def _store_latest_data(self, file, data):
+    #     for ch in self.channels.values():
+    #         latest_data = self.convert2volts(ch.buffer_total[ch.latest_writing_position:ch.newest_data_position], ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
+    #         # Convert to current (A) if the case 
+    #         if ch.irange is not None: latest_data = np.muliply(ch.buffer_total, ch.irange)   
+    #         np.savetxt(ch.saving_file, latest_data, delimiter = '\t')
+    #         # ch.saving_file.write('\n')
+    #         ch.latest_writing_position = ch.newest_data_position
     
-    
-    def set_channel(self, channel, vrange): 
+    def _close_saving_files(self):
+        for ch in self.channels.values():
+            ch.saving_file.close()
+
+    def set_channel(self, channel, vrange, saving_path, IRange = None): 
         '''
         Set channel of the connetted picoscope.
         Parameters:
@@ -236,11 +248,23 @@ class PicoScope4000():
         index of the channelInputRanges list which contains values in mV
         channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
         '''
+        # Create file for saving 
+        saving_dir = saving_path+'/pico_aquisition'
+        Path(saving_dir).mkdir(parents=True, exist_ok=True)
+        saving_file = open(saving_dir + f'/channel{channel[-1]}.txt', 'w')
+        # Create header for the file
+        if IRange != None:
+            saving_file.write('Current/A\n')
+        else:
+            saving_file.write('Voltage/V\n')
+
         self.channels[channel[-1]] = PicoChannel(channel, 
                                                  ps.PS4000_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
                                                  np.zeros(shape=self.capture_size*self.number_captures, dtype=np.int16),
-                                                 {})
+                                                 {},
+                                                 saving_file,
+                                                 IRange)
         # Give an alias to the object for an easier reference
         ch = self.channels[channel[-1]]
         ch.status["set_channel"] = ps.ps4000SetChannel(self.handle,
