@@ -8,6 +8,8 @@ from picosdk.ps4000 import ps4000 as ps
 from picosdk.functions import adc2mV, assert_pico_ok
 from dataclasses import dataclass
 from threading import Thread
+from typing import TextIO
+from pathlib import Path
 
 @dataclass
 class PicoChannel :
@@ -93,14 +95,15 @@ class PicoScope4000():
         self.wasCalledBack = True
         destEnd = self.nextSample + noOfSamples
         sourceEnd = startIndex + noOfSamples
-        if self.is_debug: print(f'Number of samples copied in the buffer: {noOfSamples}')
         for ch in self.channels.values():
             ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
-            np.savetxt(ch.buffer_small[startIndex:sourceEnd], latest_data, delimiter = '\t')
+            np.savetxt(ch.saving_file, 
+                       self.convert_ADC_numbers(ch.buffer_total[self.nextSample:destEnd],ch.vrange, ch.irange),
+                       delimiter = '\t')
         self.nextSample += noOfSamples
         if autoStop: 
             self.autoStopOuter = True
-            self._close_saving_files
+            
     
     
     def run_streaming_non_blocking(self, autoStop = False):
@@ -156,11 +159,21 @@ class PicoScope4000():
                 # again.
                 time.sleep(0.001)
         else:
+            self._close_saving_files()
             print('> Pico msg: Acquisition completed!')
-        # return self.channels
     
     def available_device(self):
         return ps.ps4000EnumerateUnits() # i don't understand how it works
+    
+    
+    def convert_ADC_numbers (self, data, vrange, irange = None):
+        ''' 
+        Convert the data from the ADC into physical values.
+        '''
+        numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
+        if irange != None:
+            numbers = numbers * irange
+        return numbers
     
     
     def convert2volts(self, signal, vrange):
@@ -215,8 +228,23 @@ class PicoScope4000():
     def _close_saving_files(self):
         for ch in self.channels.values():
             ch.saving_file.close()
+    
+    def _save_channel_metadata(self, channel, saving_dir):
+        with open(saving_dir+f'/metadata_channel{channel.name[-1]}.txt', 'w') as f:
+            f.write(f'Name : {channel.name}\n'
+                    f'Voltage range : {channel.vrange}\n'
+                    f'Allocated driver buffer: {channel.buffer_small.size} Points\n'
+                    f'Allocated software buffer : {channel.buffer_total.size} Points\n'
+                    f'IRange : {channel.irange}\n'
+                    f'Capture size: {self.capture_size} Points\n'
+                    f'Samples total : {self.samples_total} Points\n'
+                    f'Number captures : {self.number_captures} \n'
+                    f'Sampling time : {self.sampling_time}\n'
+                    f'Time unit : {self.time_unit}\n'
+                    f'Device handle id : {self.handle}\n')
 
-    def set_channel(self, channel, vrange, saving_path, IRange = None): 
+    
+    def set_channel(self, channel, vrange, saving_path, irange = None): 
         '''
         Set channel of the connetted picoscope.
         Parameters:
@@ -253,10 +281,10 @@ class PicoScope4000():
         Path(saving_dir).mkdir(parents=True, exist_ok=True)
         saving_file = open(saving_dir + f'/channel{channel[-1]}.txt', 'w')
         # Create header for the file
-        if IRange != None:
-            saving_file.write('Current/A\n')
-        else:
+        if irange == None:
             saving_file.write('Voltage/V\n')
+        else:
+            saving_file.write('Current/A\n')
 
         self.channels[channel[-1]] = PicoChannel(channel, 
                                                  ps.PS4000_RANGE[vrange],
@@ -264,7 +292,7 @@ class PicoScope4000():
                                                  np.zeros(shape=self.capture_size*self.number_captures, dtype=np.int16),
                                                  {},
                                                  saving_file,
-                                                 IRange)
+                                                 irange)
         # Give an alias to the object for an easier reference
         ch = self.channels[channel[-1]]
         ch.status["set_channel"] = ps.ps4000SetChannel(self.handle,
@@ -285,6 +313,8 @@ class PicoScope4000():
                                                               None,
                                                               self.capture_size)
         assert_pico_ok(ch.status["setDataBuffers"])
+        
+        self._save_channel_metadata(ch, saving_dir)
     
     
     

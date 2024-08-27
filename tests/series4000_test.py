@@ -14,7 +14,9 @@ sampling_time_scale = 'PS4000_MS'
 # Connect i nstrument and perform the acquisiton
 pico2 = PicoScope4000()
 pico2.set_pico(capture_size, samples_total, sampling_time, sampling_time_scale, is_debug = True)
-pico2.set_channel('PS4000_CHANNEL_A', 'PS4000_200MV')
+saving_path = 'E:/Experimental_data/Federico/2024/python_software_test/2408271511_testing_pico4000_printing_buffer_to_see_first_numbers'
+pico2.set_channel('PS4000_CHANNEL_A', 'PS4000_200MV', saving_path)
+pico2.set_channel('PS4000_CHANNEL_B', 'PS4000_200MV', saving_path, 100)
 pico2.run_streaming_non_blocking(autoStop=1)
 
 #%%
