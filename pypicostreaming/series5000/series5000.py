@@ -19,6 +19,8 @@ class PicoChannel :
     buffer_total : int
     status       : str
     saving_file  : TextIO
+    latest_writing_position : int = 0
+    newest_data_position : int = 0
     irange       : int = None # Different only for measuring current over a resistor, must be a value in A
 
 
@@ -106,6 +108,7 @@ class Picoscope5000a():
         The callback function called by the Picoscope driver. Slightly modified
         from the example to include the class attributes.
         '''
+        print('Callback called!')
         self.wasCalledBack = True
         destEnd = self.nextSample + noOfSamples
         sourceEnd = startIndex + noOfSamples
@@ -117,6 +120,7 @@ class Picoscope5000a():
                 print (ch.buffer_small)
         if self.is_debug: print('Copied small buffers to big buffers')
         self.nextSample += noOfSamples
+        self._store_lates_data()
         if autoStop: 
             self.autoStopOuter = True
     
@@ -138,8 +142,8 @@ class Picoscope5000a():
         assert_pico_ok(self.status["runStreaming"])
         print("> Pico msg: Acquisition started!")
         self.cFuncPtr = ps.StreamingReadyType(self.streaming_callback)
-        get_data_thread = Thread( target=(self.get_data_loop) )
-        get_data_thread.start()
+        self.get_data_thread = Thread( target=(self.get_data_loop) )
+        self.get_data_thread.start()
         
     
     def run_streaming_blocking(self, autoStop = True):
@@ -164,11 +168,13 @@ class Picoscope5000a():
 
     def _store_lates_data(self):
         for ch in self.channels.values():
-            latest_data = self.convert2volts(ch.buffer_total, ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
+            latest_data = self.convert2volts(ch.buffer_total[ch.latest_writing_position:ch.newest_data_position], ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
             # Convert to current (A) if the case 
             if ch.irange is not None: latest_data = np.muliply(ch.buffer_total, ch.irange)   
-            ch.saving_file.write(latest_data)
-            ch.saving_file.write('\n')
+            np.savetxt(ch.saving_file, latest_data, delimiter = '\t')
+            # ch.saving_file.write('\n')
+            ch.latest_writing_position = ch.newest_data_position
+        print('Data saved to storage')
 
     def _close_saving_files(self):
         for ch in self.channels.values():
@@ -178,13 +184,11 @@ class Picoscope5000a():
         '''
         Run the streaming from picoscope in a dedicated thread
         '''
-        while self.autoStopOuter:
+        while not self.autoStopOuter:
             self.wasCalledBack = False
             self.status["getStreamingLastestValues"] = ps.ps5000aGetStreamingLatestValues(self.handle, 
                                                                                           self.cFuncPtr, 
                                                                                           None) 
-            self._store_lates_data()
-            # !!! Here I can put the process part for online data elaboration
             if not self.wasCalledBack:
                 # If we weren't called back by the driver, this means no data is ready. Sleep for a short while before trying
                 # again.
@@ -192,7 +196,7 @@ class Picoscope5000a():
         else:
             self._close_saving_files()
             print('> Pico msg: Acquisition completed!')
-        # return self.channels
+            
     
     def available_device(self):
         return ps.ps5000aEnumerateUnits() # i don't understand how it works
@@ -223,6 +227,7 @@ class Picoscope5000a():
         '''
         self.status["stop"] = ps.ps5000aStop(self.handle)
         assert_pico_ok(self.status["stop"])
+        self.autoStopOuter = True
         print("> Pico msg: pico stopped!")
     
     
@@ -312,7 +317,7 @@ class Picoscope5000a():
                                                               ch.buffer_small.ctypes.data_as(
                                                                   ctypes.POINTER(ctypes.c_int16)),
                                                               self.capture_size,
-                                                              segmentIndex, 
+                                                              ch.newest_data_position, 
                                                               ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'])
         assert_pico_ok(ch.status["setDataBuffers"])
         

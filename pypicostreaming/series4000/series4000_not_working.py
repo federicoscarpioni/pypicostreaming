@@ -1,22 +1,21 @@
-# -*- coding: utf-8 -*-
-
 import ctypes
 import time
 from datetime import datetime
 import numpy as np
 from picosdk.ps4000 import ps4000 as ps
-from picosdk.functions import adc2mV, assert_pico_ok
+from picosdk.functions import  assert_pico_ok
 from dataclasses import dataclass
+import queue
 from threading import Thread
 
-@dataclass
+@dataclass 
 class PicoChannel :
-    name         : str
-    vrange       : str
-    buffer_small : int
-    buffer_total : int
-    status       : str
-    irange       : int = None # Different only for measuring current over a resistor, must be a value in A
+    name            : str
+    vrange          : str
+    buffer_small    : int
+    maximum_samples : int
+    status          : str
+    irange          : int = None # Different only for measuring current over a resistor, must be a value in A
 
 class PicoScope4000():
     def __init__(self):
@@ -91,18 +90,13 @@ class PicoScope4000():
         '''
         self.wasCalledBack = True
         destEnd = self.nextSample + noOfSamples
-        sourceEnd = startIndex + noOfSamples
-        if self.is_debug: print(f'Number of samples copied in the buffer: {noOfSamples}')
+        endIndex = startIndex + noOfSamples
+        if self.is_debug: print(f'Number of new samples in the buffer: {noOfSamples}')
         for ch in self.channels.values():
-            ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
-            if self.is_debug : 
-                print('Channel'+ch.name[-1]+ ' small buffer:')
-                print (ch.buffer_small)
-        if self.is_debug: print('Copied small buffers to big buffers')
+            print(ch.buffer_small[startIndex:endIndex])
+            #ch.signal.put(ch.buffer_small[startIndex:startIndex + noOfSamples])
         self.nextSample += noOfSamples
-        # if autoStop: 
-        #     self.autoStopOuter = True
-    
+
     
     def run_streaming_non_blocking(self, autoStop = False):
         ''' 
@@ -147,7 +141,7 @@ class PicoScope4000():
         '''
         Run the streaming from picoscope in a dedicated thread
         '''
-        while self.nextSample < self.samples_total and not self.autoStopOuter:
+        while self.autoStopOuter:
             self.wasCalledBack = False
             self.status["getStreamingLastestValues"] = ps.ps4000GetStreamingLatestValues(self.handle, 
                                                                                           self.cFuncPtr, 
@@ -155,10 +149,10 @@ class PicoScope4000():
             if not self.wasCalledBack:
                 # If we weren't called back by the driver, this means no data is ready. Sleep for a short while before trying
                 # again.
-                time.sleep(0.001)
+                time.sleep(1)
         else:
             print('> Pico msg: Acquisition completed!')
-        # return self.channels
+        
     
     def available_device(self):
         return ps.ps4000EnumerateUnits() # i don't understand how it works
@@ -171,7 +165,6 @@ class PicoScope4000():
         return np.multiply(-signal, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
         
 
-
     
     def convert_all_channels(self):
         '''
@@ -179,9 +172,9 @@ class PicoScope4000():
         specified in the channel definition.
         '''
         for ch in self.channels.values():
-            ch.buffer_total = self.convert2volts(ch.buffer_total, ch.vrange)
+            ch.signal = self.convert2volts(ch.signal, ch.vrange)
             # Convert to current (A) if the case 
-            if ch.irange is not None: ch.buffer_total = np.muliply(ch.buffer_total, ch.irange)
+            if ch.irange is not None: ch.signal = np.muliply(ch.signal, ch.irange)
 
     
     def stop(self):
@@ -243,6 +236,7 @@ class PicoScope4000():
                                                  {})
         # Give an alias to the object for an easier reference
         ch = self.channels[channel[-1]]
+        ch.signal = queue.Queue()
         ch.status["set_channel"] = ps.ps4000SetChannel(self.handle,
                                                        ps.PS4000_CHANNEL[ch.name],
                                                        True,  # In the example, 1 is used
@@ -250,16 +244,14 @@ class PicoScope4000():
                                                        ch.vrange)
         assert_pico_ok(ch.status["set_channel"])
 
-        '''Allocate a buffer in the memory for store the complete sampled
+        '''Allocate a buffer in the memory for storing the sampled
         signal and gives the pointer of the buffer to the driver
-        buffer_total must be Numpy array
         '''
-        ch.status["setDataBuffers"] = ps.ps4000SetDataBuffers(self.handle,  # !!! Perché la funzione con la s???
-                                                              ps.PS4000_CHANNEL[ch.name],
-                                                              ch.buffer_small.ctypes.data_as(
-                                                                  ctypes.POINTER(ctypes.c_int16)),
-                                                              None,
-                                                              self.capture_size)
+        ch.status["setDataBuffers"] = ps.ps4000SetDataBuffer(self.handle,  
+                                                            ps.PS4000_CHANNEL[ch.name],
+                                                            ch.buffer_small.ctypes.data_as(
+                                                                ctypes.POINTER(ctypes.c_int16)),
+                                                            self.capture_size)
         assert_pico_ok(ch.status["setDataBuffers"])
     
     
@@ -271,28 +263,3 @@ class PicoScope4000():
                                                                  enabled)
         assert_pico_ok(self.status["setBandwidthFilter"])
     
-    
-    def reinitialize_channels(self):
-        '''
-        Re-initilize current used channels for a new acquisition. 
-        '''
-        self.nextSample = 0
-        self.autoStopOuter = False
-        self.wasCalledBack = False
-        for ch in self.channels.values():
-            # # Re-initilize data of each channel
-            # ch = PicoChannel(ch.name,
-            #                   ch.vrange,
-            #                   ch.buffer_small,  # give the old allocated array to not waste time on reallocating a lot of memory
-            #                   ch.buffer_total,
-            #                   {})
-            # # Point the small buffer position to the driver
-            # ps.ps4000SetDataBuffers(self.handle,  # !!! Perché la funzione con la s???
-            #                         ps.PS4000_CHANNEL[ch.name],
-            #                         ch.buffer_small.ctypes.data_as(
-            #                             ctypes.POINTER(ctypes.c_int16)),
-            #                         None,
-            #                         self.capture_size)
-            
-            # New idea
-            ch.buffer_total[0:] = 0
