@@ -53,13 +53,19 @@ class Picoscope5000a():
     def time_unit_in_seconds(self, sampling_time, time_unit):
         time_convertion_factors = [1e-15, 1e-12, 1e-9, 1e-6, 1e-3, 1]
         return sampling_time * time_convertion_factors[time_unit]
-
+    
+    def _save_device_metadata(self, saving_dir):
+        with open(saving_dir+'/device_metadata.txt', 'w') as f:
+            f.write('PICO  DEVICE METADATA FILE\n'
+                    f'Device handle id : {self.handle}\n')
+        # !!! Add the call to ps5000aGetUnitInfo for the details on the device     
     
     def set_pico(self, 
                  capture_size, 
                  samples_total, 
                  sampling_time, 
                  time_unit,
+                 saving_path,
                  is_debug = False):
         '''
         Set parameters valid for the acquisition on all channels and variables
@@ -77,6 +83,7 @@ class Picoscope5000a():
         'PS5000A_S' : seconds
         '''
         # Measurement parameters
+
         self.capture_size = capture_size
         self.samples_total = samples_total # Total must be an integer number of capture_size
         self.number_captures = int(self.samples_total/self.capture_size)
@@ -92,7 +99,11 @@ class Picoscope5000a():
         self.max_adc = ctypes.c_int16(32767) # 16bit convertion
         self.channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
 
-    
+        self.saving_dir = saving_path+'/pico_aquisition'
+        Path(self.saving_dir).mkdir(parents=True, exist_ok=True)    
+        self._save_device_metadata(self.saving_dir)
+        
+
     def streaming_callback(self, 
                            handle, 
                            noOfSamples, 
@@ -118,12 +129,22 @@ class Picoscope5000a():
         if autoStop: 
             self.autoStopOuter = True
     
+    def _save_measurement_metadata(self, saving_dir):
+        with open (saving_dir+'/measurement_metadata.txt', 'w') as f:
+            f.write('PICO MEASUREMENT METADATA FILE\n\n'
+                    f'Starting of the measurement: {self.time_start}\n'
+                    f'Capture size: {self.capture_size} Samples\n'
+                    f'Samples total: {self.samples_total}\n'
+                    f'Number captures: {self.number_captures}\n'
+                    f'Sampling time: {self.dt_in_seconds} s \n')
     
     def run_streaming_non_blocking(self, autoStop = True):
         ''' 
         Start the streaming of sampled signals from picoscope internal memory.
         '''
-        self.time_start = datetime.now()
+        now = datetime.now()
+        self.time_start = now.strftime("%d/%m/%Y %H:%M:%S")
+        self._save_measurement_metadata(self.saving_dir)
         self.status["runStreaming"] = ps.ps5000aRunStreaming(self.handle,
                                                             ctypes.byref(self.sampling_time),
                                                             self.time_unit,
@@ -246,7 +267,7 @@ class Picoscope5000a():
                     f'Time unit : {self.time_unit}\n'
                     f'Device handle id : {self.handle}\n')
     
-    def set_channel(self, channel, vrange, saving_path, irange = None): 
+    def set_channel(self, channel, vrange, irange = None): 
         '''
         Set channel of the connetted picoscope.
         Parameters:
@@ -287,9 +308,8 @@ class Picoscope5000a():
         channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
         '''
         
-        saving_dir = saving_path+'/pico_aquisition'
-        Path(saving_dir).mkdir(parents=True, exist_ok=True)
-        saving_file = open(saving_dir + f'/channel{channel[-1]}.txt', 'w')
+        
+        saving_file = open(self.saving_dir + f'/channel{channel[-1]}.txt', 'w')
         # Create header for the file
         if irange == None:
             saving_file.write('Voltage/V\n')
@@ -331,4 +351,4 @@ class Picoscope5000a():
                                                               ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'])
         assert_pico_ok(ch.status["setDataBuffers"])
         
-        self._save_channel_metadata(ch, saving_dir)
+        self._save_channel_metadata(ch, self.saving_dir)
