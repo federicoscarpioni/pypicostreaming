@@ -10,13 +10,14 @@ from dataclasses import dataclass
 from threading import Thread
 from pathlib import Path
 from typing import TextIO
+from collections import deque
 
 @dataclass
 class PicoChannel :
     name         : str
     vrange       : str
     buffer_small : int
-    buffer_total : int
+    signal       : deque
     status       : str
     saving_file  : TextIO
     irange       : int = None # Different only for measuring current over a resistor, must be a value in A
@@ -118,14 +119,15 @@ class Picoscope5000a():
         from the example to include the class attributes.
         '''
         self.wasCalledBack = True
-        destEnd = self.nextSample + noOfSamples
+        # destEnd = self.nextSample + noOfSamples
         sourceEnd = startIndex + noOfSamples
         for ch in self.channels.values():
-            ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
+            # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
+            ch.signal.append(ch.buffer_small[startIndex:sourceEnd])
             np.savetxt(ch.saving_file, 
-                       self.convert_ADC_numbers(ch.buffer_total[self.nextSample:destEnd],ch.vrange, ch.irange),
+                       self.convert_ADC_numbers(ch.buffer_small[startIndex:sourceEnd],ch.vrange, ch.irange),
                        delimiter = '\t')
-        self.nextSample += noOfSamples
+        # self.nextSample += noOfSamples
         if autoStop: 
             self.autoStopOuter = True
     
@@ -258,7 +260,7 @@ class Picoscope5000a():
             f.write(f'Name : {channel.name}\n'
                     f'Voltage range : {channel.vrange}\n'
                     f'Allocated driver buffer: {channel.buffer_small.size} Points\n'
-                    f'Allocated software buffer : {channel.buffer_total.size} Points\n'
+                    f'Allocated software buffer : {self.samples_total} Points\n'
                     f'IRange : {channel.irange}\n'
                     f'Capture size: {self.capture_size} Points\n'
                     f'Samples total : {self.samples_total} Points\n'
@@ -319,7 +321,7 @@ class Picoscope5000a():
         self.channels[channel[-1]] = PicoChannel(channel, 
                                                  ps.PS5000A_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
-                                                 np.zeros(shape=self.capture_size*self.number_captures, dtype=np.int16),
+                                                 deque(maxlen=self.samples_total),
                                                  {},
                                                  saving_file,
                                                  irange)
