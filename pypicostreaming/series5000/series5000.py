@@ -10,18 +10,19 @@ from dataclasses import dataclass
 from threading import Thread
 from pathlib import Path
 from typing import TextIO
-from collections import deque
+from collections import deque, namedtuple
 
 @dataclass
 class PicoChannel :
     name         : str
     vrange       : str
     buffer_small : int
-    signal       : deque
+    buffer_total : int
     status       : str
-    saving_file  : TextIO
     irange       : int = None # Different only for measuring current over a resistor, must be a value in A
 
+# Cell2eData = namedtuple('Cell2eData', 'Ewe I')
+# Cell3eData = namedtuple('Cell3eData', 'Ewe I Ecell')
 
 class Picoscope5000a():
     def __init__(self, resolution, serial = None):
@@ -67,6 +68,7 @@ class Picoscope5000a():
                  sampling_time, 
                  time_unit,
                  saving_path,
+                 method = 'save_all_samples',
                  is_debug = False):
         '''
         Set parameters valid for the acquisition on all channels and variables
@@ -91,6 +93,7 @@ class Picoscope5000a():
         self.sampling_time = ctypes.c_int32(sampling_time)
         self.time_unit = ps.PS5000A_TIME_UNITS[time_unit]
         self.dt_in_seconds = self.time_unit_in_seconds(sampling_time, self.time_unit)
+        self.method = method
         self.is_debug = is_debug
         # Software parameters
         self.channels = {} # Dictionary containing all the information of set up channels
@@ -103,7 +106,7 @@ class Picoscope5000a():
         self.saving_dir = saving_path+'/pico_aquisition'
         Path(self.saving_dir).mkdir(parents=True, exist_ok=True)    
         self._save_device_metadata(self.saving_dir)
-        
+
 
     def streaming_callback(self, 
                            handle, 
@@ -119,15 +122,11 @@ class Picoscope5000a():
         from the example to include the class attributes.
         '''
         self.wasCalledBack = True
-        # destEnd = self.nextSample + noOfSamples
+        destEnd = self.nextSample + noOfSamples
         sourceEnd = startIndex + noOfSamples
         for ch in self.channels.values():
-            # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
-            ch.signal.append(ch.buffer_small[startIndex:sourceEnd])
-            np.savetxt(ch.saving_file, 
-                       self.convert_ADC_numbers(ch.buffer_small[startIndex:sourceEnd],ch.vrange, ch.irange),
-                       delimiter = '\t')
-        # self.nextSample += noOfSamples
+            ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
+        self.nextSample += noOfSamples
         if autoStop: 
             self.autoStopOuter = True
     
@@ -230,7 +229,18 @@ class Picoscope5000a():
             # Convert to current (A) if the case 
             if ch.irange is not None: ch.buffer_total = np.multiply(ch.buffer_total, ch.irange)
 
-    
+    def save_signals(self, subfolder_name=None):
+        if subfolder_name is None :
+            path = self.saving_dir
+        else:
+            path = self.saving_dir + subfolder_name
+        for ch in self.channels.values():
+            file_name = path + f'/channel{ch[-1]}.npy'
+            np.save(file_name, ch.buffer_total)
+
+    def reset_buffer(self):
+        self.nextSample = 0
+
     def stop(self):
         '''
         Stop the picoscope.
@@ -310,20 +320,11 @@ class Picoscope5000a():
         channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
         '''
         
-        
-        saving_file = open(self.saving_dir + f'/channel{channel[-1]}.txt', 'w')
-        # Create header for the file
-        if irange == None:
-            saving_file.write('Voltage/V\n')
-        else:
-            saving_file.write('Current/A\n')
-
-        self.channels[channel[-1]] = PicoChannel(channel, 
+        self.channels[channel[-1]] = PicoChannel(channel,
                                                  ps.PS5000A_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
-                                                 deque(maxlen=self.samples_total),
+                                                 np.zeros(shape=self.capture_size*self.number_captures, dtype=np.int16),
                                                  {},
-                                                 saving_file,
                                                  irange)
         # Give an alias to the object for an easier reference
         ch = self.channels[channel[-1]]
