@@ -196,7 +196,6 @@ class Picoscope5000a():
                 # again.
                 time.sleep(0.001)
         else:
-            self._close_saving_files()
             print('> Pico msg: Acquisition completed!')
             
     
@@ -231,11 +230,12 @@ class Picoscope5000a():
 
     def save_signals(self, subfolder_name=None):
         if subfolder_name is None :
-            path = self.saving_dir
+            self.saving_file_path = self.saving_dir
         else:
-            path = self.saving_dir + subfolder_name
+            self.saving_file_path = self.saving_dir + subfolder_name
+            Path(self.saving_file_path).mkdir(parents=True, exist_ok=True)
         for ch in self.channels.values():
-            file_name = path + f'/channel{ch[-1]}.npy'
+            file_name = self.saving_file_path + f'/channel{ch.name[-1]}.npy'
             np.save(file_name, ch.buffer_total)
 
     def reset_buffer(self):
@@ -249,7 +249,6 @@ class Picoscope5000a():
         self.status["stop"] = ps.ps5000aStop(self.handle)
         assert_pico_ok(self.status["stop"])
         self.autoStopOuter = True
-        self._close_saving_files
         print("> Pico msg: pico stopped!")
     
     
@@ -261,9 +260,7 @@ class Picoscope5000a():
         assert_pico_ok(self.status["close"])
         print("> Pico msg: Device disconnected.")
     
-    def _close_saving_files(self):
-        for ch in self.channels.values():
-            ch.saving_file.close()
+
 
     def _save_channel_metadata(self, channel, saving_dir):
         with open(saving_dir+f'/metadata_channel{channel.name[-1]}.txt', 'w') as f:

@@ -1,3 +1,4 @@
+README.md
 setup.py
 pypicostreaming.egg-info/PKG-INFO
 pypicostreaming.egg-info/SOURCES.txt
