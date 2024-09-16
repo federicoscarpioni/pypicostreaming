@@ -42,6 +42,7 @@ class Picoscope5000a():
         self.handle = ctypes.c_int16()
         self.status = {}
         self.connect()
+
     
     
     def connect(self):
@@ -216,27 +217,56 @@ class Picoscope5000a():
         Convert data from integer of the ADC to values in voltage
         '''
         return np.multiply(-signal, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
-    
-    
+
+    def convert_channel(self, channel):
+         signal = self.convert2volts(channel.buffer_total,
+                                             channel.vrange)
+         # Convert to current (A) if the case
+         if channel.irange is not None:
+            signal = np.multiply(signal, channel.irange)
+         return signal
+
     def convert_all_channels(self):
         '''
         Convert data from all the channel to voltage values and to current if
         specified in the channel definition.
         '''
         for ch in self.channels.values(): 
-            ch.buffer_total = self.convert2volts(ch.buffer_total, ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
-            # Convert to current (A) if the case 
-            if ch.irange is not None: ch.buffer_total = np.multiply(ch.buffer_total, ch.irange)
+            ch.buffer_total = self.convert_channel(ch) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
+
+    def save_signal(self, channel, subfolder_name = None):
+        if subfolder_name is None :
+            saving_file_path = self.saving_dir
+        else:
+            saving_file_path = self.saving_dir + subfolder_name
+            Path(saving_file_path).mkdir(parents=True, exist_ok=True)
+        file_name = saving_file_path + f'/channel{channel.name[-1]}.npy'
+        np.save(file_name, channel.buffer_total)
 
     def save_signals(self, subfolder_name=None):
-        if subfolder_name is None :
-            self.saving_file_path = self.saving_dir
-        else:
-            self.saving_file_path = self.saving_dir + subfolder_name
-            Path(self.saving_file_path).mkdir(parents=True, exist_ok=True)
         for ch in self.channels.values():
-            file_name = self.saving_file_path + f'/channel{ch.name[-1]}.npy'
+            self.save_signal(ch, subfolder_name)
+
+
+    def save_intermediate_signals(self, subfolder_name):
+        '''
+        Save part of the buffer. Typically used when autostop is False or one doesn't know the lenght of the
+        '''
+        for ch in self.channels.values():
+            signal = self.convert2volts(ch.buffer_total[0:self.nextSample],
+                                    ch.vrange)
+            # Convert to current (A) if the case
+            if ch.irange is not None:
+                signal = np.multiply(signal, ch.irange)
+            if subfolder_name is None:
+                saving_file_path = self.saving_dir
+            else:
+                saving_file_path = self.saving_dir + subfolder_name
+                Path(saving_file_path).mkdir(parents=True, exist_ok=True)
+            file_name = saving_file_path + f'/channel{ch.name[-1]}.npy'
             np.save(file_name, ch.buffer_total)
+            self.reset_buffer()
+
 
     def reset_buffer(self):
         self.nextSample = 0
