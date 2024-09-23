@@ -22,4 +22,3 @@ pico.run_streaming_non_blocking(autoStop= True)
 #%%
 pico.stop()
 pico.disconnect()
-

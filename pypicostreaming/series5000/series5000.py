@@ -231,7 +231,7 @@ class Picoscope5000a():
         Convert data from all the channel to voltage values and to current if
         specified in the channel definition.
         '''
-        for ch in self.channels.values(): 
+        for ch in self.channels.values():
             ch.buffer_total = self.convert_channel(ch) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
 
     def save_signal(self, channel, subfolder_name = None):
@@ -264,8 +264,9 @@ class Picoscope5000a():
                 saving_file_path = self.saving_dir + subfolder_name
                 Path(saving_file_path).mkdir(parents=True, exist_ok=True)
             file_name = saving_file_path + f'/channel{ch.name[-1]}.npy'
-            np.save(file_name, ch.buffer_total)
-            self.reset_buffer()
+            np.save(file_name, signal)
+            print(f'File saved {ch.name}')
+        self.reset_buffer()
 
 
     def reset_buffer(self):
