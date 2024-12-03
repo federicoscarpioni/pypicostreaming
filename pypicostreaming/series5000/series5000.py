@@ -250,7 +250,7 @@ class Picoscope5000a():
 
     def save_intermediate_signals(self, subfolder_name):
         '''
-        Save part of the buffer. Typically used when autostop is False or one doesn't know the lenght of the
+        Save part of the buffer. Typically used when autostop is False or one doesn't know the lenght of the signal to sample
         '''
         for ch in self.channels.values():
             signal = self.convert2volts(ch.buffer_total[0:self.nextSample],
