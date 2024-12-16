@@ -4,6 +4,7 @@ import ctypes
 import time
 from datetime import datetime
 import numpy as np
+from np_rw_buffer import RingBuffer
 from picosdk.ps5000a import ps5000a as ps
 from picosdk.functions import adc2mV, assert_pico_ok
 from dataclasses import dataclass
@@ -126,7 +127,10 @@ class Picoscope5000a():
         destEnd = self.nextSample + noOfSamples
         sourceEnd = startIndex + noOfSamples
         for ch in self.channels.values():
-            ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
+            # old
+            # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
+            # new
+            ch.buffer_total.write(ch.buffer_small[startIndex:sourceEnd])
         self.nextSample += noOfSamples
         if autoStop: 
             self.autoStopOuter = True
@@ -207,6 +211,8 @@ class Picoscope5000a():
         ''' 
         Convert the data from the ADC into physical values.
         '''
+        # !!! Here there is a minus only beacause the potentiosat has negative values
+        # !!! Correct this for general
         numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
         if irange != None:
             numbers = np.multiply(numbers, irange)
@@ -351,7 +357,7 @@ class Picoscope5000a():
         self.channels[channel[-1]] = PicoChannel(channel,
                                                  ps.PS5000A_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
-                                                 np.zeros(shape=self.capture_size*self.number_captures, dtype=np.int16),
+                                                 RingBuffer(self.capture_size*self.number_captures, dtype=np.int16),
                                                  {},
                                                  irange)
         # Give an alias to the object for an easier reference
