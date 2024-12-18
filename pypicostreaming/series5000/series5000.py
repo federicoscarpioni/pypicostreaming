@@ -94,7 +94,7 @@ class Picoscope5000a():
         self.number_captures = int(self.samples_total/self.capture_size)
         self.sampling_time = ctypes.c_int32(sampling_time)
         self.time_unit = ps.PS5000A_TIME_UNITS[time_unit]
-        self.dt_in_seconds = self.time_unit_in_seconds(sampling_time, self.time_unit)
+        self.time_step = self.time_unit_in_seconds(sampling_time, self.time_unit)
         self.method = method
         self.is_debug = is_debug
         # Software parameters
@@ -109,6 +109,13 @@ class Picoscope5000a():
         Path(self.saving_dir).mkdir(parents=True, exist_ok=True)    
         self._save_device_metadata(self.saving_dir)
 
+    def _online_computation(self):
+        """
+        Here can be put code for make computation on new data. Ideally operataion
+        can be included in child classes expanding this one that will be called
+        inside the callback after retriving new data from the instrument.
+        """
+        pass
 
     def streaming_callback(self, 
                            handle, 
@@ -131,6 +138,7 @@ class Picoscope5000a():
             # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
             # new
             ch.buffer_total.write(ch.buffer_small[startIndex:sourceEnd])
+        self._online_computation()
         self.nextSample += noOfSamples
         if autoStop: 
             self.autoStopOuter = True
@@ -142,7 +150,7 @@ class Picoscope5000a():
                     f'Capture size: {self.capture_size} Samples\n'
                     f'Samples total: {self.samples_total}\n'
                     f'Number captures: {self.number_captures}\n'
-                    f'Sampling time: {self.dt_in_seconds} s \n')
+                    f'Sampling time: {self.time_step} s \n')
     
     def run_streaming_non_blocking(self, autoStop = True):
         ''' 
@@ -357,7 +365,7 @@ class Picoscope5000a():
         self.channels[channel[-1]] = PicoChannel(channel,
                                                  ps.PS5000A_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
-                                                 RingBuffer(self.capture_size*self.number_captures, dtype=np.int16),
+                                                 RingBuffer((self.capture_size*self.number_captures,0), dtype=np.int16),
                                                  {},
                                                  irange)
         # Give an alias to the object for an easier reference
