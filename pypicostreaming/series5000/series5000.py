@@ -365,7 +365,7 @@ class Picoscope5000a():
         self.channels[channel[-1]] = PicoChannel(channel,
                                                  ps.PS5000A_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
-                                                 RingBuffer((self.capture_size*self.number_captures,0), dtype=np.int16),
+                                                 RingBuffer((self.capture_size*self.number_captures,1), dtype=np.int16),
                                                  {},
                                                  irange)
         # Give an alias to the object for an easier reference
