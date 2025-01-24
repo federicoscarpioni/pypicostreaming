@@ -8,7 +8,7 @@ from np_rw_buffer import RingBuffer
 from picosdk.ps5000a import ps5000a as ps
 from picosdk.functions import adc2mV, assert_pico_ok
 from dataclasses import dataclass
-from threading import Thread
+from threading import Thread, RLock
 from pathlib import Path
 from typing import TextIO
 from collections import deque, namedtuple
@@ -43,6 +43,7 @@ class Picoscope5000a():
         self.handle = ctypes.c_int16()
         self.status = {}
         self.connect()
+        self.lock = RLock()
 
     
     
@@ -130,18 +131,19 @@ class Picoscope5000a():
         The callback function called by the Picoscope driver. Slightly modified
         from the example to include the class attributes.
         '''
-        self.wasCalledBack = True
-        destEnd = self.nextSample + noOfSamples
-        sourceEnd = startIndex + noOfSamples
-        for ch in self.channels.values():
-            # old
-            # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
-            # new
-            ch.buffer_total.write(ch.buffer_small[startIndex:sourceEnd])
-        self._online_computation()
-        self.nextSample += noOfSamples
-        if autoStop: 
-            self.autoStopOuter = True
+        with self.lock:
+            self.wasCalledBack = True
+            destEnd = self.nextSample + noOfSamples
+            sourceEnd = startIndex + noOfSamples
+            for ch in self.channels.values():
+                # old
+                # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
+                # new
+                ch.buffer_total.write(ch.buffer_small[startIndex:sourceEnd])
+            self._online_computation()
+            self.nextSample += noOfSamples
+            if autoStop: 
+                self.autoStopOuter = True
     
     def _save_measurement_metadata(self, saving_dir):
         with open (saving_dir+'/measurement_metadata.txt', 'w') as f:
@@ -233,7 +235,7 @@ class Picoscope5000a():
         return np.multiply(-signal, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
 
     def convert_channel(self, channel):
-         signal = self.convert2volts(channel.buffer_total,
+         signal = self.convert2volts(channel.buffer_total.read(),
                                              channel.vrange)
          # Convert to current (A) if the case
          if channel.irange is not None:
@@ -267,7 +269,7 @@ class Picoscope5000a():
         Save part of the buffer. Typically used when autostop is False or one doesn't know the lenght of the signal to sample
         '''
         for ch in self.channels.values():
-            signal = self.convert2volts(ch.buffer_total[0:self.nextSample],
+            signal = self.convert2volts(ch.buffer_total.read(),
                                     ch.vrange)
             # Convert to current (A) if the case
             if ch.irange is not None:
