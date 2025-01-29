@@ -43,7 +43,7 @@ class Picoscope5000a():
         self.handle = ctypes.c_int16()
         self.status = {}
         self.connect()
-        self.lock = RLock()
+        # self.lock = RLock()
 
     
     
@@ -131,19 +131,19 @@ class Picoscope5000a():
         The callback function called by the Picoscope driver. Slightly modified
         from the example to include the class attributes.
         '''
-        with self.lock:
-            self.wasCalledBack = True
-            destEnd = self.nextSample + noOfSamples
-            sourceEnd = startIndex + noOfSamples
-            for ch in self.channels.values():
-                # old
-                # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
-                # new
-                ch.buffer_total.write(ch.buffer_small[startIndex:sourceEnd])
-            self._online_computation()
-            self.nextSample += noOfSamples
-            if autoStop: 
-                self.autoStopOuter = True
+        # with self.lock:
+        self.wasCalledBack = True
+        destEnd = self.nextSample + noOfSamples
+        sourceEnd = startIndex + noOfSamples
+        for ch in self.channels.values():
+            # old
+            # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
+            # new
+            ch.buffer_total.write(ch.buffer_small[startIndex:sourceEnd], error = False)
+        self._online_computation()
+        self.nextSample += noOfSamples
+        if autoStop: 
+            self.autoStopOuter = True
     
     def _save_measurement_metadata(self, saving_dir):
         with open (saving_dir+'/measurement_metadata.txt', 'w') as f:
@@ -399,3 +399,7 @@ class Picoscope5000a():
         assert_pico_ok(ch.status["setDataBuffers"])
         
         self._save_channel_metadata(ch, self.saving_dir)
+        
+    def reset_buffers(self):
+        for ch in self.channels.values():
+            ch.buffer_total.read()
