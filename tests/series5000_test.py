@@ -17,7 +17,7 @@ pico.set_pico(capture_size, samples_total, sampling_time, sampling_time_scale, s
 pico.set_channel('PS5000A_CHANNEL_A', 'PS5000A_100MV')
 # pico.set_channel('PS5000A_CHANNEL_B', 'PS5000A_2V', 0.01)
 # pico.set_channel('PS5000A_CHANNEL_C', 'PS5000A_500MV')
-pico.run_streaming_non_blocking(autoStop= True)
+pico.run_streaming_non_blocking(autoStop= False)
 
 #%%
 pico.stop()
