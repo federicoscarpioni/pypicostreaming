@@ -22,8 +22,6 @@ class PicoChannel :
     status       : str
     irange       : int = None # Different only for measuring current over a resistor, must be a value in A
 
-# Cell2eData = namedtuple('Cell2eData', 'Ewe I')
-# Cell3eData = namedtuple('Cell3eData', 'Ewe I Ecell')
 
 class Picoscope5000a():
     def __init__(self, resolution, serial = None):
