@@ -3,7 +3,7 @@ This is a test for the Picoscope class. It collect data on channel A for
 50 seconds at 0.1 seconds time step.
 '''
 
-from pypicostreaming.series4000.series4000 import PicoScope4000
+from pypicostreaming.series4000 import PicoScope4000
 
 # Measurment paramters
 capture_size = 20
