@@ -1,0 +1,35 @@
+[project]
+name = "pypicostreaming"
+version = "0.1.0"
+description = " A package for convenient  streaming of signals for PicoScopes USB devices from PicoTech.
+authors = [
+    {name = "Federico Scarpioni", email = "federicoscarpioni@gmail.com"},
+]
+maintainers = [
+    {name = "Federico Scarpioni", email = "federicoscarpioni@gmail.com"},
+]
+readme = "README.md"
+requires-python = ""
+dependencies = [,
+    "numpy",
+    "picosdk"
+]
+license = "MIT"
+license-files = ["LICENSE"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/federicoscarpioni/pypicostreaming.git"
+Issues = "https://github.com/federicoscarpioni/pypicostreaming/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "S", "UP"]
