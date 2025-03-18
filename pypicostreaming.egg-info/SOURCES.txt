@@ -1,6 +1,0 @@
-README.md
-setup.py
-pypicostreaming.egg-info/PKG-INFO
-pypicostreaming.egg-info/SOURCES.txt
-pypicostreaming.egg-info/dependency_links.txt
-pypicostreaming.egg-info/top_level.txt
