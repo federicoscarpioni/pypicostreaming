@@ -1,0 +1,2 @@
+from pypicostreaming.series4000 import Picoscope4000
+from pypicostreaming.series5000a import Picoscope5000a
