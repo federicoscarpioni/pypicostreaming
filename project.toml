@@ -1,7 +1,7 @@
 [project]
 name = "pypicostreaming"
 version = "0.1.0"
-description = " A package for convenient  streaming of signals for PicoScopes USB devices from PicoTech.
+description = " A package for convenient  streaming of signals for PicoScopes USB devices from PicoTech."
 authors = [
     {name = "Federico Scarpioni", email = "federicoscarpioni@gmail.com"},
 ]

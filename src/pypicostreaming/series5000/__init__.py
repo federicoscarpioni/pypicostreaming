@@ -4,7 +4,7 @@ import ctypes
 import time
 from datetime import datetime
 import numpy as np
-from np_rw_buffer import RingBuffer
+from NumpyCircularBuffer import NumpyCircularBuffer
 from picosdk.ps5000a import ps5000a as ps
 from picosdk.functions import adc2mV, assert_pico_ok
 from dataclasses import dataclass
@@ -135,7 +135,7 @@ class Picoscope5000a():
             # old
             # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
             # new
-            ch.buffer_total.write(ch.buffer_small[startIndex:sourceEnd])
+            ch.buffer_total.push(ch.buffer_small[startIndex:sourceEnd])
         self._online_computation()
         self.nextSample += noOfSamples
         if autoStop: 
@@ -218,7 +218,7 @@ class Picoscope5000a():
         Convert the data from the ADC into physical values.
         '''
         # !!! Here there is a minus only beacause the potentiosat has negative values
-        # !!! Correct this for general
+        # !!! I should orrect this for general use
         numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
         if irange != None:
             numbers = np.multiply(numbers, irange)
@@ -231,20 +231,20 @@ class Picoscope5000a():
         return np.multiply(-signal, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
 
     def convert_channel(self, channel):
-         signal = self.convert2volts(channel.buffer_total,
+         signal = self.convert2volts(channel.buffer_total.get_data(),
                                              channel.vrange)
          # Convert to current (A) if the case
          if channel.irange is not None:
             signal = np.multiply(signal, channel.irange)
          return signal
 
-    def convert_all_channels(self):
+    def get_signals_converted(self):
         '''
         Convert data from all the channel to voltage values and to current if
         specified in the channel definition.
         '''
         for ch in self.channels.values():
-            ch.buffer_total = self.convert_channel(ch) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
+            return self.convert_channel(ch) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
 
     def save_signal(self, channel, subfolder_name = None):
         if subfolder_name is None :
@@ -363,7 +363,7 @@ class Picoscope5000a():
         self.channels[channel[-1]] = PicoChannel(channel,
                                                  ps.PS5000A_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
-                                                 RingBuffer((self.capture_size*self.number_captures,1), dtype=np.int16),
+                                                 NumpyCircularBuffer((self.capture_size*self.number_captures,1), dtype=np.int16),
                                                  {},
                                                  irange)
         # Give an alias to the object for an easier reference
