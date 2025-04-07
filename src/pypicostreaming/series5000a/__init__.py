@@ -4,7 +4,7 @@ import ctypes
 import time
 from datetime import datetime
 import numpy as np
-from NumpyCircularBuffer import NumpyCircularBuffer
+from npbuffer import NumpyCircularBuffer
 from picosdk.ps5000a import ps5000a as ps
 from picosdk.functions import adc2mV, assert_pico_ok
 from dataclasses import dataclass
@@ -217,7 +217,7 @@ class Picoscope5000a():
     def available_device(self):
         return ps.ps5000aEnumerateUnits() # i don't understand how it works
     
-    def convert_ADC_numbers (self, data, vrange, irange = None):
+    def convert_ADC_numbers(self, data, vrange, irange = None):
         ''' 
         Convert the data from the ADC into physical values.
         '''
