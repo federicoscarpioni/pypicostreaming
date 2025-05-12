@@ -242,14 +242,16 @@ class Picoscope5000a():
             signal = np.multiply(signal, channel.irange)
          return signal
 
-    def convert_all_channels(self):
+    def get_all_signals(self):
         '''
         Convert data from all the channel to voltage values and to current if
         specified in the channel definition.
         '''
+        signal_list = []
         for ch in self.channels.values():
-            ch.buffer_total = self.convert_channel(ch) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
-
+            signal_list.append(self.convert_channel(ch))
+        return tuple(signal_list)
+    
     def save_signal(self, channel, subfolder_name = None):
         if subfolder_name is None :
             saving_file_path = self.saving_dir
