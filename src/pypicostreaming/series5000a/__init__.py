@@ -2,6 +2,7 @@
 
 import ctypes
 import time
+import json
 from datetime import datetime
 import numpy as np
 from npbuffer import NumpyCircularBuffer
@@ -21,6 +22,7 @@ class PicoChannel :
     buffer_total : NumpyCircularBuffer
     status       : str
     irange       : int = None # Different only for measuring current over a resistor, must be a value in A
+    signal_name  : str = None
 
 # Cell2eData = namedtuple('Cell2eData', 'Ewe I')
 # Cell3eData = namedtuple('Cell3eData', 'Ewe I Ecell')
@@ -58,12 +60,7 @@ class Picoscope5000a():
     def time_unit_in_seconds(self, sampling_time, time_unit):
         time_convertion_factors = [1e-15, 1e-12, 1e-9, 1e-6, 1e-3, 1]
         return sampling_time * time_convertion_factors[time_unit]
-    
-    def _save_device_metadata(self, saving_dir):
-        with open(saving_dir+'/device_metadata.txt', 'w') as f:
-            f.write('PICO  DEVICE METADATA FILE\n'
-                    f'Device handle id : {self.handle}\n')
-        # !!! Add the call to ps5000aGetUnitInfo for the details on the device     
+     
     
     def set_pico(self, 
                  capture_size, 
@@ -108,7 +105,7 @@ class Picoscope5000a():
 
         self.saving_dir = saving_path+'/pico_aquisition'
         Path(self.saving_dir).mkdir(parents=True, exist_ok=True)    
-        self._save_device_metadata(self.saving_dir)
+
 
     def _online_computation(self):
         """
@@ -145,22 +142,12 @@ class Picoscope5000a():
         if autoStop: 
             self.autoStopOuter = True
     
-    def _save_measurement_metadata(self, saving_dir):
-        with open (saving_dir+'/measurement_metadata.txt', 'w') as f:
-            f.write('PICO MEASUREMENT METADATA FILE\n\n'
-                    f'Starting of the measurement: {self.time_start}\n'
-                    f'Capture size: {self.capture_size} Samples\n'
-                    f'Samples total: {self.samples_total}\n'
-                    f'Number captures: {self.number_captures}\n'
-                    f'Sampling time: {self.time_step} s \n')
-    
     def run_streaming_non_blocking(self, autoStop = True):
         ''' 
         Start the streaming of sampled signals from picoscope internal memory.
         '''
         now = datetime.now()
         self.time_start = now.strftime("%d/%m/%Y %H:%M:%S")
-        self._save_measurement_metadata(self.saving_dir)
         self.status["runStreaming"] = ps.ps5000aRunStreaming(self.handle,
                                                             ctypes.byref(self.sampling_time),
                                                             self.time_unit,
@@ -309,21 +296,6 @@ class Picoscope5000a():
         assert_pico_ok(self.status["close"])
         print("> Pico msg: Device disconnected.")
     
-
-
-    def _save_channel_metadata(self, channel, saving_dir):
-        with open(saving_dir+f'/metadata_channel{channel.name[-1]}.txt', 'w') as f:
-            f.write(f'Name : {channel.name}\n'
-                    f'Voltage range : {channel.vrange}\n'
-                    f'Allocated driver buffer: {channel.buffer_small.size} Points\n'
-                    f'Allocated software buffer : {self.samples_total} Points\n'
-                    f'IRange : {channel.irange}\n'
-                    f'Capture size: {self.capture_size} Points\n'
-                    f'Samples total : {self.samples_total} Points\n'
-                    f'Number captures : {self.number_captures} \n'
-                    f'Sampling time : {self.sampling_time}\n'
-                    f'Time unit : {self.time_unit}\n'
-                    f'Device handle id : {self.handle}\n')
     
     def set_channel(self, channel, vrange, irange = None): 
         '''
@@ -400,8 +372,31 @@ class Picoscope5000a():
                                                               ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'])
         assert_pico_ok(ch.status["setDataBuffers"])
         
-        self._save_channel_metadata(ch, self.saving_dir)
         
-    def reset_buffers(self):
+    def empty_buffers(self):
         for ch in self.channels.values():
             ch.buffer_total.empty()
+
+    def save_metadata(self, autoStop):
+        metadata_dict = {
+            'Device serial': self.serial,
+            'Resolution': self.resolution,
+            'Buffer size (Sa)': self.samples_total,
+            'Sampling time (s)': self.time_step,
+            'Auto stop' : autoStop,
+        }
+        cahnnels_metadata = dict()
+        for ch in self.channels:
+            channel_info = {
+                'Voltage range' : ch.vrange,
+                'Memory buffer size' : ch.buffer_total.maxlen,
+                'Drive buffer size' : ch.buffer_small,
+                'Converting factor' : ch.irange,
+                'Signal name' : ch.signal_name,
+            }
+            cahnnels_metadata.update(
+                {ch.name : channel_info}
+            )
+        metadata_dict.update(cahnnels_metadata)
+        with open(self.dir +'/metadata_pico.json', 'w') as fp:
+            json.dump(metadata_dict, fp)
