@@ -21,7 +21,7 @@ class PicoChannel :
     buffer_small : int
     buffer_total : NumpyCircularBuffer
     status       : str
-    irange       : int = None # Different only for measuring current over a resistor, must be a value in A
+    conv_factor  : int = None
     signal_name  : str = None
 
 # Cell2eData = namedtuple('Cell2eData', 'Ewe I')
@@ -146,8 +146,7 @@ class Picoscope5000a():
         ''' 
         Start the streaming of sampled signals from picoscope internal memory.
         '''
-        now = datetime.now()
-        self.time_start = now.strftime("%d/%m/%Y %H:%M:%S")
+        self.save_metadata(autoStop)
         self.status["runStreaming"] = ps.ps5000aRunStreaming(self.handle,
                                                             ctypes.byref(self.sampling_time),
                                                             self.time_unit,
@@ -168,7 +167,7 @@ class Picoscope5000a():
         ''' 
         Start the streaming of sampled signals from picoscope internal memory.
         '''
-        self.time_start = datetime.now()
+        self.save_metadata(autoStop)
         self.status["runStreaming"] = ps.ps5000aRunStreaming(self.handle,
                                                             ctypes.byref(self.sampling_time),
                                                             self.time_unit,
@@ -204,15 +203,15 @@ class Picoscope5000a():
     def available_device(self):
         return ps.ps5000aEnumerateUnits() # i don't understand how it works
     
-    def convert_ADC_numbers(self, data, vrange, irange = None):
+    def convert_ADC_numbers(self, data, vrange, conv_factor = None):
         ''' 
         Convert the data from the ADC into physical values.
         '''
         # !!! Here there is a minus only beacause the potentiosat has negative values
         # !!! Correct this for general
         numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
-        if irange != None:
-            numbers = np.multiply(numbers, irange)
+        if conv_factor != None:
+            numbers = np.multiply(numbers, conv_factor)
         return numbers
 
     def convert2volts(self, signal, vrange):
@@ -225,8 +224,8 @@ class Picoscope5000a():
          signal = self.convert2volts(channel.buffer_total.empty(),
                                              channel.vrange)
          # Convert to current (A) if the case
-         if channel.irange is not None:
-            signal = np.multiply(signal, channel.irange)
+         if channel.conv_factor is not None:
+            signal = np.multiply(signal, channel.conv_factor)
          return signal
 
     def get_all_signals(self):
@@ -261,8 +260,8 @@ class Picoscope5000a():
             signal = self.convert2volts(ch.buffer_total.empty(),
                                     ch.vrange)
             # Convert to current (A) if the case
-            if ch.irange is not None:
-                signal = np.multiply(signal, ch.irange)
+            if ch.conv_factor is not None:
+                signal = np.multiply(signal, ch.conv_factor)
             if subfolder_name is None:
                 saving_file_path = self.saving_dir
             else:
@@ -297,7 +296,7 @@ class Picoscope5000a():
         print("> Pico msg: Device disconnected.")
     
     
-    def set_channel(self, channel, vrange, irange = None): 
+    def set_channel(self, channel, vrange, signal_name = None, conv_factor = None): 
         '''
         Set channel of the connetted picoscope.
         Parameters:
@@ -343,7 +342,8 @@ class Picoscope5000a():
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
                                                  NumpyCircularBuffer((self.capture_size*self.number_captures), dtype=np.int16),
                                                  {},
-                                                 irange)
+                                                 conv_factor,
+                                                 signal_name)
         # Give an alias to the object for an easier reference
         ch = self.channels[channel[-1]]
         channelEnabled = True
@@ -379,24 +379,24 @@ class Picoscope5000a():
 
     def save_metadata(self, autoStop):
         metadata_dict = {
+            'Starting time' : datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             'Device serial': self.serial,
             'Resolution': self.resolution,
-            'Buffer size (Sa)': self.samples_total,
+            'Circular buffer size (Sa)': self.samples_total,
+            'Driver buffer size (Sa)' : self.capture_size,
             'Sampling time (s)': self.time_step,
             'Auto stop' : autoStop,
         }
         cahnnels_metadata = dict()
-        for ch in self.channels:
+        for ch in self.channels.values():
             channel_info = {
                 'Voltage range' : ch.vrange,
-                'Memory buffer size' : ch.buffer_total.maxlen,
-                'Drive buffer size' : ch.buffer_small,
-                'Converting factor' : ch.irange,
+                'Converting factor' : ch.conv_factor,
                 'Signal name' : ch.signal_name,
             }
             cahnnels_metadata.update(
                 {ch.name : channel_info}
             )
         metadata_dict.update(cahnnels_metadata)
-        with open(self.dir +'/metadata_pico.json', 'w') as fp:
+        with open(self.saving_dir +'/metadata_pico.json', 'w') as fp:
             json.dump(metadata_dict, fp)
