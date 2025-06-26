@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import ctypes
 import time
 import json
@@ -22,8 +20,6 @@ class PicoChannel :
     conv_factor  : int = None
     signal_name  : str = None
 
-# Cell2eData = namedtuple('Cell2eData', 'Ewe I')
-# Cell3eData = namedtuple('Cell3eData', 'Ewe I Ecell')
 
 class Picoscope5000a():
     def __init__(self, resolution, serial = None):
