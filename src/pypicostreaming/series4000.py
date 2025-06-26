@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
-
 import ctypes
 import time
+import json
 from datetime import datetime
 import numpy as np
+from npbuffer import NumpyCircularBuffer
 from picosdk.ps4000 import ps4000 as ps
-from picosdk.functions import adc2mV, assert_pico_ok
+from picosdk.functions import assert_pico_ok
 from dataclasses import dataclass
 from threading import Thread
-from typing import TextIO
 from pathlib import Path
 
 @dataclass
@@ -16,14 +15,18 @@ class PicoChannel :
     name         : str
     vrange       : str
     buffer_small : int
-    buffer_total : int
+    buffer_total : NumpyCircularBuffer
     status       : str
-    saving_file  : TextIO
-    irange       : int = None # Different only for measuring current over a resistor, must be a value in A
+    conv_factor  : int = None
+    signal_name  : str = None
+
 
 class Picoscope4000():
     def __init__(self):
-        # Connect the instrument
+        '''
+        Connect the instrument (connects always to the erlriest plugged to the 
+        computer that is not already in use).
+        '''
         self.handle = ctypes.c_int16()
         self.status = {}
         self.connect()
@@ -31,8 +34,7 @@ class Picoscope4000():
     
     def connect(self):
         self.status["openunit"] = ps.ps4000OpenUnit(ctypes.byref(self.handle))
-        assert_pico_ok(self.status["openunit"]) # !!! It is not celar to me how and why of this function
-        
+        assert_pico_ok(self.status["openunit"]) 
     
 
     def time_unit_in_seconds(self, sampling_time, time_unit):
@@ -67,7 +69,7 @@ class Picoscope4000():
         self.number_captures = int(self.samples_total/self.capture_size)
         self.sampling_time = ctypes.c_int32(sampling_time)
         self.time_unit = ps.PS4000_TIME_UNITS[time_unit]
-        self.dt_in_seconds = self.time_unit_in_seconds(sampling_time, self.time_unit)
+        self.time_step = self.time_unit_in_seconds(sampling_time, self.time_unit)
         self.is_debug = is_debug
         # Software parameters
         self.channels = {} # Dictionary containing all the information of set up channels
@@ -77,6 +79,17 @@ class Picoscope4000():
         self.max_adc = ctypes.c_int16(32767) # 16bit convertion
         self.channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
 
+        self.saving_dir = saving_path+'/pico_aquisition'
+        Path(self.saving_dir).mkdir(parents=True, exist_ok=True)  
+
+
+    def _online_computation(self):
+        """
+        Here can be put code for make computation on new data. Ideally operataion
+        can be included in child classes expanding this one that will be called
+        inside the callback after retriving new data from the instrument.
+        """
+        pass
 
 
     def streaming_callback(self, 
@@ -93,23 +106,20 @@ class Picoscope4000():
         from the example to include the class attributes.
         '''
         self.wasCalledBack = True
-        destEnd = self.nextSample + noOfSamples
         sourceEnd = startIndex + noOfSamples
         for ch in self.channels.values():
-            ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
-            np.savetxt(ch.saving_file, 
-                       self.convert_ADC_numbers(ch.buffer_total[self.nextSample:destEnd],ch.vrange, ch.irange),
-                       delimiter = '\t')
+            ch.buffer_total.push(ch.buffer_small[startIndex:sourceEnd])
+        self._online_computation()
         self.nextSample += noOfSamples
         if autoStop: 
             self.autoStopOuter = True
             
     
-    def run_streaming_non_blocking(self, autoStop = False):
+    def run_streaming_non_blocking(self, autoStop = True):
         ''' 
         Start the streaming of sampled signals from picoscope internal memory.
         '''
-        self.time_start = datetime.now()
+        self.save_metadata(autoStop)
         self.status["runStreaming"] = ps.ps4000RunStreaming(self.handle,
                                                             ctypes.byref(self.sampling_time),
                                                             self.time_unit,
@@ -129,7 +139,7 @@ class Picoscope4000():
         ''' 
         Start the streaming of sampled signals from picoscope internal memory.
         '''
-        self.time_start = datetime.now()
+        self.save_metadata(autoStop)
         self.status["runStreaming"] = ps.ps4000RunStreaming(self.handle,
                                                             ctypes.byref(self.sampling_time),
                                                             self.time_unit,
@@ -158,20 +168,21 @@ class Picoscope4000():
                 # again.
                 time.sleep(0.001)
         else:
-            self._close_saving_files()
             print('> Pico msg: Acquisition completed!')
     
     def available_device(self):
-        return ps.ps4000EnumerateUnits() # i don't understand how it works
+        return ps.ps4000EnumerateUnits() 
     
     
-    def convert_ADC_numbers (self, data, vrange, irange = None):
+    def convert_ADC_numbers(self, data, vrange, conv_factor = None):
         ''' 
         Convert the data from the ADC into physical values.
         '''
+        # !!! Here there is a minus only beacause the potentiosat has negative values
+        # !!! Correct this for general use case
         numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
-        if irange != None:
-            numbers = np.multiply(numbers, irange)
+        if conv_factor != None:
+            numbers = np.multiply(numbers, conv_factor)
         return numbers
     
     
@@ -181,69 +192,78 @@ class Picoscope4000():
         '''
         return np.multiply(-signal, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
         
-
-
     
-    def convert_all_channels(self):
+    def convert_channel(self, channel):
+         signal = self.convert2volts(channel.buffer_total.empty(),
+                                             channel.vrange)
+         # Convert to current (A) if the case
+         if channel.conv_factor is not None:
+            signal = np.multiply(signal, channel.conv_factor)
+         return signal
+
+    def get_all_signals(self):
         '''
         Convert data from all the channel to voltage values and to current if
         specified in the channel definition.
         '''
+        signal_list = []
         for ch in self.channels.values():
-            ch.buffer_total = self.convert2volts(ch.buffer_total, ch.vrange)
-            # Convert to current (A) if the case 
-            if ch.irange is not None: ch.buffer_total = np.multiply(ch.buffer_total, ch.irange)
-
+            signal_list.append(self.convert_channel(ch))
+        return tuple(signal_list)
     
-    def stop(self):
-        '''
-        Stop the picoscope.
+    def save_signal(self, channel, subfolder_name = None):
+        if subfolder_name is None :
+            saving_file_path = self.saving_dir
+        else:
+            saving_file_path = self.saving_dir + subfolder_name
+            Path(saving_file_path).mkdir(parents=True, exist_ok=True)
+        file_name = saving_file_path + f'/channel{channel.name[-1]}.npy'
+        np.save(file_name, channel.buffer_total)
 
+    def save_signals(self, subfolder_name=None):
+        for ch in self.channels.values():
+            self.save_signal(ch, subfolder_name)
+
+
+    def save_intermediate_signals(self, subfolder_name):
         '''
+        Save part of the buffer. Typically used when autostop is False or one doesn't know the lenght of the signal to sample
+        '''
+        for ch in self.channels.values():
+            signal = self.convert2volts(ch.buffer_total.empty(),
+                                    ch.vrange)
+            # Convert to current (A) if the case
+            if ch.conv_factor is not None:
+                signal = np.multiply(signal, ch.conv_factor)
+            if subfolder_name is None:
+                saving_file_path = self.saving_dir
+            else:
+                saving_file_path = self.saving_dir + subfolder_name
+                Path(saving_file_path).mkdir(parents=True, exist_ok=True)
+            file_name = saving_file_path + f'/channel{ch.name[-1]}.npy'
+            np.save(file_name, signal)
+            print(f'File saved {ch.name}')
+        self.reset_buffer()
+
+
+    def reset_buffer(self):
+        self.nextSample = 0
+    
+
+    def stop(self):
         self.status["stop"] = ps.ps4000Stop(self.handle)
         assert_pico_ok(self.status["stop"])
         self.autoStopOuter = True
-        self._close_saving_files
         print("> Pico msg: pico stopped!")
     
     
     def disconnect(self):
-        '''
-        Disconnect the instrument.
-        '''
         self.status["close"] = ps.ps4000CloseUnit(self.handle)
         assert_pico_ok(self.status["close"])
         print("> Pico msg: Device disconnected.")
     
-    # def _store_latest_data(self, file, data):
-    #     for ch in self.channels.values():
-    #         latest_data = self.convert2volts(ch.buffer_total[ch.latest_writing_position:ch.newest_data_position], ch.vrange) # !!! This apporach is not ideal beacuse doubles tha ammount of RAM allocated
-    #         # Convert to current (A) if the case 
-    #         if ch.irange is not None: latest_data = np.muliply(ch.buffer_total, ch.irange)   
-    #         np.savetxt(ch.saving_file, latest_data, delimiter = '\t')
-    #         # ch.saving_file.write('\n')
-    #         ch.latest_writing_position = ch.newest_data_position
     
-    def _close_saving_files(self):
-        for ch in self.channels.values():
-            ch.saving_file.close()
-    
-    def _save_channel_metadata(self, channel, saving_dir):
-        with open(saving_dir+f'/metadata_channel{channel.name[-1]}.txt', 'w') as f:
-            f.write(f'Name : {channel.name}\n'
-                    f'Voltage range : {channel.vrange}\n'
-                    f'Allocated driver buffer: {channel.buffer_small.size} Points\n'
-                    f'Allocated software buffer : {channel.buffer_total.size} Points\n'
-                    f'IRange : {channel.irange}\n'
-                    f'Capture size: {self.capture_size} Points\n'
-                    f'Samples total : {self.samples_total} Points\n'
-                    f'Number captures : {self.number_captures} \n'
-                    f'Sampling time : {self.sampling_time}\n'
-                    f'Time unit : {self.time_unit}\n'
-                    f'Device handle id : {self.handle}\n')
-
-    
-    def set_channel(self, channel, vrange, saving_path, irange = None): 
+    def set_channel(self, channel, vrange, signal_name = None, conv_factor = None): 
         '''
         Set channel of the connetted picoscope.
         Parameters:
@@ -275,23 +295,15 @@ class Picoscope4000():
         index of the channelInputRanges list which contains values in mV
         channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
         '''
-        # Create file for saving 
-        saving_dir = saving_path+'/pico_aquisition'
-        Path(saving_dir).mkdir(parents=True, exist_ok=True)
-        saving_file = open(saving_dir + f'/channel{channel[-1]}.txt', 'w')
-        # Create header for the file
-        if irange == None:
-            saving_file.write('Voltage/V\n')
-        else:
-            saving_file.write('Current/A\n')
+
 
         self.channels[channel[-1]] = PicoChannel(channel, 
                                                  ps.PS4000_RANGE[vrange],
                                                  np.zeros(shape=self.capture_size, dtype=np.int16), # ADC is 16 bit 
                                                  np.zeros(shape=self.capture_size*self.number_captures, dtype=np.int16),
                                                  {},
-                                                 saving_file,
-                                                 irange)
+                                                 conv_factor,
+                                                 signal_name)
         # Give an alias to the object for an easier reference
         ch = self.channels[channel[-1]]
         ch.status["set_channel"] = ps.ps4000SetChannel(self.handle,
@@ -313,9 +325,10 @@ class Picoscope4000():
                                                               self.capture_size)
         assert_pico_ok(ch.status["setDataBuffers"])
         
-        self._save_channel_metadata(ch, saving_dir)
     
-    
+    def empty_buffers(self):
+        for ch in self.channels.values():
+            ch.buffer_total.empty()
     
 
     def bandwith_limiter(self, channel, enabled = 1):
@@ -325,27 +338,26 @@ class Picoscope4000():
         assert_pico_ok(self.status["setBandwidthFilter"])
     
     
-    def reinitialize_channels(self):
-        '''
-        Re-initilize current used channels for a new acquisition. 
-        '''
-        self.nextSample = 0
-        self.autoStopOuter = False
-        self.wasCalledBack = False
+    def save_metadata(self, autoStop):
+        metadata_dict = {
+            'Starting time' : datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            'Device serial': self.serial,
+            'Resolution': self.resolution,
+            'Circular buffer size (Sa)': self.samples_total,
+            'Driver buffer size (Sa)' : self.capture_size,
+            'Sampling time (s)': self.time_step,
+            'Auto stop' : autoStop,
+        }
+        cahnnels_metadata = dict()
         for ch in self.channels.values():
-            # # Re-initilize data of each channel
-            # ch = PicoChannel(ch.name,
-            #                   ch.vrange,
-            #                   ch.buffer_small,  # give the old allocated array to not waste time on reallocating a lot of memory
-            #                   ch.buffer_total,
-            #                   {})
-            # # Point the small buffer position to the driver
-            # ps.ps4000SetDataBuffers(self.handle,  # !!! Perché la funzione con la s???
-            #                         ps.PS4000_CHANNEL[ch.name],
-            #                         ch.buffer_small.ctypes.data_as(
-            #                             ctypes.POINTER(ctypes.c_int16)),
-            #                         None,
-            #                         self.capture_size)
-            
-            # New idea
-            ch.buffer_total[0:] = 0
+            channel_info = {
+                'Voltage range' : ch.vrange,
+                'Converting factor' : ch.conv_factor,
+                'Signal name' : ch.signal_name,
+            }
+            cahnnels_metadata.update(
+                {ch.name : channel_info}
+            )
+        metadata_dict.update(cahnnels_metadata)
+        with open(self.saving_dir +'/metadata_pico.json', 'w') as fp:
+            json.dump(metadata_dict, fp)
