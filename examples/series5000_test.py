@@ -2,7 +2,7 @@
 This is a test for the Picoscope class. 
 '''
 
-from pypicostreaming.pypicostreaming.series5000.series5000 import Picoscope5000a
+from pypicostreaming import Picoscope5000a
 
 # Measurment paramters
 capture_size = 100000
