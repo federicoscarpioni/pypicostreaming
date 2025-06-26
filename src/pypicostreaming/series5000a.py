@@ -7,12 +7,10 @@ from datetime import datetime
 import numpy as np
 from npbuffer import NumpyCircularBuffer
 from picosdk.ps5000a import ps5000a as ps
-from picosdk.functions import adc2mV, assert_pico_ok
+from picosdk.functions import assert_pico_ok
 from dataclasses import dataclass
-from threading import Thread, RLock
+from threading import Thread
 from pathlib import Path
-from typing import TextIO
-from collections import deque, namedtuple
 
 @dataclass
 class PicoChannel :
