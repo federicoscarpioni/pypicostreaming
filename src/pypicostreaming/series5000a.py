@@ -42,14 +42,12 @@ class Picoscope5000a():
         # self.lock = RLock()
 
     
-    
     def connect(self):
         self.status["openunit"] = ps.ps5000aOpenUnit(ctypes.byref(self.handle),
                                                     self.serial,
                                                     ps.PS5000A_DEVICE_RESOLUTION[self.resolution])
-        assert_pico_ok(self.status["openunit"]) # !!! It is not celar to me how and why of this function
+        assert_pico_ok(self.status["openunit"]) 
         
-    
 
     def time_unit_in_seconds(self, sampling_time, time_unit):
         time_convertion_factors = [1e-15, 1e-12, 1e-9, 1e-6, 1e-3, 1]
@@ -122,14 +120,9 @@ class Picoscope5000a():
         The callback function called by the Picoscope driver. Slightly modified
         from the example to include the class attributes.
         '''
-        # with self.lock:
         self.wasCalledBack = True
-        destEnd = self.nextSample + noOfSamples
         sourceEnd = startIndex + noOfSamples
         for ch in self.channels.values():
-            # old
-            # ch.buffer_total[self.nextSample:destEnd] = ch.buffer_small[startIndex:sourceEnd]
-            # new
             ch.buffer_total.push(ch.buffer_small[startIndex:sourceEnd])
         self._online_computation()
         self.nextSample += noOfSamples
@@ -195,24 +188,27 @@ class Picoscope5000a():
             
     
     def available_device(self):
-        return ps.ps5000aEnumerateUnits() # i don't understand how it works
+        return ps.ps5000aEnumerateUnits() 
     
+
     def convert_ADC_numbers(self, data, vrange, conv_factor = None):
         ''' 
         Convert the data from the ADC into physical values.
         '''
         # !!! Here there is a minus only beacause the potentiosat has negative values
-        # !!! Correct this for general
+        # !!! Correct this for general use case
         numbers = np.multiply(-data, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
         if conv_factor != None:
             numbers = np.multiply(numbers, conv_factor)
         return numbers
+
 
     def convert2volts(self, signal, vrange):
         '''
         Convert data from integer of the ADC to values in voltage
         '''
         return np.multiply(-signal, (self.channelInputRanges[vrange]/self.max_adc.value/1000), dtype = 'float32')
+
 
     def convert_channel(self, channel):
          signal = self.convert2volts(channel.buffer_total.empty(),
@@ -270,11 +266,8 @@ class Picoscope5000a():
     def reset_buffer(self):
         self.nextSample = 0
 
-    def stop(self):
-        '''
-        Stop the picoscope.
 
-        '''
+    def stop(self):
         self.status["stop"] = ps.ps5000aStop(self.handle)
         assert_pico_ok(self.status["stop"])
         self.autoStopOuter = True
@@ -282,9 +275,6 @@ class Picoscope5000a():
     
     
     def disconnect(self):
-        '''
-        Disconnect the instrument.
-        '''
         self.status["close"] = ps.ps5000aCloseUnit(self.handle)
         assert_pico_ok(self.status["close"])
         print("> Pico msg: Device disconnected.")
